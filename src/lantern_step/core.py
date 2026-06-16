@@ -116,3 +116,31 @@ def build_taper_model(profile: ProfileData, params: ModelParams) -> TaperModel:
         extension_length=float(params.extension_length),
         z_cyl_end=float(z_cyl_end),
     )
+
+
+def make_solid(model: TaperModel) -> cq.Solid:
+    """Revolve the closed (radius, z) profile into a single watertight solid."""
+    # Profile on the XZ workplane: local (x, y) = (radius, z).
+    profile_pts = [(0.0, float(model.z_model_extended[0]))]  # on axis -> flat start cap
+    profile_pts += [
+        (float(r), float(z))
+        for z, r in zip(model.z_model_extended, model.r_model_extended)
+    ]
+    profile_pts.append((model.radius_final, model.z_cyl_end))  # cylinder wall
+    profile_pts.append((0.0, model.z_cyl_end))                 # flat end cap to axis
+    return (
+        cq.Workplane("XZ")
+        .polyline(profile_pts)
+        .close()
+        .revolve(360, (0, 0, 0), (0, 1, 0))
+        .val()
+    )
+
+
+def export_step(solid, ref_bodies, path) -> None:
+    """Export the solid (and any reference bodies, as a compound) to a STEP file."""
+    if ref_bodies:
+        shape = cq.Compound.makeCompound([solid] + list(ref_bodies))
+    else:
+        shape = solid
+    exporters.export(shape, str(path))
