@@ -1,70 +1,35 @@
 import sys
 import os
-import pandas as pd
+
 import numpy as np
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from scipy.interpolate import make_interp_spline
-import cadquery as cq
-from cadquery import exporters
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QFileDialog, QGroupBox, QFormLayout, QMessageBox,
                              QTabWidget)
 from PyQt5.QtCore import Qt
+
+from .core import (
+    ModelParams,
+    build_taper_model,
+    export_step,
+    load_profile,
+    make_solid,
+)
+from .references import build_reference_bodies
 
 
 def parse_float_list(text):
     """Parse a comma/space separated list of floats, ignoring blank/invalid tokens."""
     vals = []
-    for tok in text.replace(',', ' ').split():
+    for tok in text.replace(",", " ").split():
         try:
             vals.append(float(tok))
         except ValueError:
             pass
     return vals
-
-
-def solve_z_for_diameter(z_arr, r_arr, target_d):
-    """Find axial positions where the local diameter crosses target_d (mm).
-
-    Linearly interpolates between samples and returns a sorted, de-duplicated
-    list of z values. Searching the tapered portion only keeps this
-    well-defined (the constant-radius cylinder would otherwise match along its
-    whole length).
-    """
-    target_r = target_d / 2.0
-    g = np.asarray(r_arr) - target_r
-    zs = []
-    for i in range(len(g) - 1):
-        a, b = g[i], g[i + 1]
-        if a == 0.0:
-            zs.append(float(z_arr[i]))
-        elif a * b < 0:  # sign change -> a crossing lies between the samples
-            t = a / (a - b)
-            zs.append(float(z_arr[i] + t * (z_arr[i + 1] - z_arr[i])))
-    if len(g) and g[-1] == 0.0:
-        zs.append(float(z_arr[-1]))
-    out = []
-    for z in sorted(zs):
-        if not out or abs(z - out[-1]) > 1e-3:  # collapse near-coincident crossings
-            out.append(z)
-    return out
-
-
-def make_reference_disk(z, local_r):
-    """A circular planar face (a free surface body) normal to the Z axis at z.
-
-    Exported alongside the solid as a separate body (never fused), so the solid
-    is unchanged. In CAD tools it imports as a surface you can turn into a
-    reference plane or section/mate against. Sized a little larger than the
-    local wall so it is easy to select.
-    """
-    margin = max(0.5, 0.25 * local_r)  # mm beyond the wall, for selectability
-    disk_r = local_r + margin
-    wire = cq.Wire.makeCircle(disk_r, cq.Vector(0, 0, z), cq.Vector(0, 0, 1))
-    return cq.Face.makeFromWires(wire)
 
 
 class LanternStepMaker(QMainWindow):
@@ -201,37 +166,19 @@ class LanternStepMaker(QMainWindow):
             
             # Load the data and update the plot and parameters
             try:
-                # Load the data
-                self.df = pd.read_excel(self.excel_file, sheet_name=0)
-                # Select relevant columns and drop missing values
-                self.df = self.df[['Left Z Motor  - Bottom Camera', 
-                              'Fiber Diameter - Bottom Camera', 
-                              'Fiber Diameter - Side Camera']].dropna()
-                self.df.columns = ['Z', 'Diameter_X', 'Diameter_Y']
-                # Normalize Z so that it starts at 0 (µm)
-                self.df['Z'] = self.df['Z'] - self.df['Z'].min()
-                
-                # Compute the average diameter and corresponding radius (in µm)
-                self.df['Diameter'] = (self.df['Diameter_X'] + self.df['Diameter_Y']) / 2
-                self.df['Radius'] = self.df['Diameter'] / 2
-                
-                # Convert units from µm to mm (1 µm = 1e-3 mm)
-                self.z_raw = self.df['Z'].values * 1e-3     # Z in mm
-                self.r_raw = self.df['Radius'].values * 1e-3  # Radius in mm
-                
-                # Set start and end distances based on the data
+                profile = load_profile(self.excel_file)
+                self.z_raw = profile.z_raw
+                self.r_raw = profile.r_raw
                 start_val = self.z_raw.min()
                 end_val = self.z_raw.max()
                 self.start_distance.setText(f"{start_val:.2f}")
                 self.end_distance.setText(f"{end_val:.2f}")
-                
-                # Plot the raw data with range indicators
-                start_val = float(self.start_distance.text())
-                end_val = float(self.end_distance.text())
-                self.plot_raw_data(self.z_raw, self.r_raw, start_val, end_val)
-                
+                self.plot_raw_data(self.z_raw, self.r_raw,
+                                   float(self.start_distance.text()),
+                                   float(self.end_distance.text()))
             except Exception as e:
-                QMessageBox.warning(self, "Error", f"Could not load Excel file: {str(e)}")
+                QMessageBox.warning(self, "Error",
+                                    f"Could not load Excel file: {str(e)}")
                 return
     
     def select_save_path(self):
@@ -263,141 +210,26 @@ class LanternStepMaker(QMainWindow):
             return
         
         try:
-            # Step 1: Load and Process Data
-            self.df = pd.read_excel(self.excel_file, sheet_name=0)
-            # Select relevant columns and drop missing values
-            self.df = self.df[['Left Z Motor  - Bottom Camera', 
-                          'Fiber Diameter - Bottom Camera', 
-                          'Fiber Diameter - Side Camera']].dropna()
-            self.df.columns = ['Z', 'Diameter_X', 'Diameter_Y']
-            # Normalize Z so that it starts at 0 (µm)
-            self.df['Z'] = self.df['Z'] - self.df['Z'].min()
-            
-            # Compute the average diameter and corresponding radius (in µm)
-            self.df['Diameter'] = (self.df['Diameter_X'] + self.df['Diameter_Y']) / 2
-            self.df['Radius'] = self.df['Diameter'] / 2
-            
-            # Convert units from µm to mm (1 µm = 1e-3 mm)
-            z_raw = self.df['Z'].values * 1e-3     # Z in mm
-            r_raw = self.df['Radius'].values * 1e-3  # Radius in mm
-            
-            # Step 2: Apply Cubic Spline Smoothing
-            spline = make_interp_spline(z_raw, r_raw, k=3)
-            num_points = 100  # resolution of the smoothed profile
-            z_smooth = np.linspace(z_raw.min(), z_raw.max(), num_points)
-            r_smooth = spline(z_smooth)
-            
-            # Step 3: Define Model Range Based on Distance from Start
-            # Filter the smoothed data based on the specified range
-            mask = (z_smooth >= start_distance) & (z_smooth <= end_distance)
-            z_model = z_smooth[mask]
-            r_model = r_smooth[mask]
-            
-            # Step 4: Extrapolate Final Measurement with Intermediate Points
-            # Use final_diameter parameter for the end diameter
-            radius_final = final_diameter / 2
-            
-            # Use the last 10 mm of data for a linear fit to extrapolate
-            if z_model[-1] - 1 < z_model[0]:
-                idx = np.arange(len(z_model))
-            else:
-                idx = np.where(z_model >= (z_model[-1] - 1))[0]
-            
-            # Linear regression: r = m*z + b
-            m, b = np.polyfit(z_model[idx], r_model[idx], 1)
-            
-            # Calculate the extrapolated Z position for the final radius
-            if np.abs(m) < 1e-6:
-                z_extrapolated = z_model[-1]
-            else:
-                z_extrapolated = (radius_final - b) / m
-            z_extrapolated = max(z_extrapolated, z_model[-1])  # ensure it doesn't go backwards
-            
-            # Generate several intermediate points between the last measured point and the extrapolated point
-            num_extrap_points = 100  # number of intermediate points
-            z_extrap_points = np.linspace(z_model[-1], z_extrapolated, num_extrap_points + 1)[1:]  # skip duplicate
-            r_extrap_points = np.linspace(r_model[-1], radius_final, num_extrap_points + 1)[1:]     # skip duplicate
-            
-            # Extend the model arrays with the extrapolation points
-            z_model_extended = np.concatenate([z_model, z_extrap_points])
-            r_model_extended = np.concatenate([r_model, r_extrap_points])
+            # Load + model via the pure core pipeline
+            profile = load_profile(self.excel_file)
+            params = ModelParams(start_distance, end_distance,
+                                 final_diameter, extension_length)
+            model = build_taper_model(profile, params)
+            solid = make_solid(model)
 
-            # Guard against spline overshoot producing non-physical (<= 0) radii,
-            # which would create degenerate wires/faces. Floor at 1 µm (1e-3 mm).
-            r_model_extended = np.clip(r_model_extended, 1e-3, None)
-
-            # Step 5: Build a single closed (radius, z) profile and revolve it.
-            #
-            # The whole part - tapered wall, constant-radius cylinder extension,
-            # and the flat end caps - is described by ONE closed profile that is
-            # revolved 360 degrees about the central (Z) axis. A surface of
-            # revolution from a closed face is always a single watertight solid,
-            # so this avoids the previous loft + boolean-fuse approach whose
-            # coincident-face union could silently fail and leave open shells
-            # (which import as surfaces, not a solid).
-            #
-            # Profile is drawn on the XZ workplane: local (x, y) = (radius, z).
-            z_cyl_end = z_extrapolated + extension_length  # end of cylinder (mm)
-
-            profile_pts = [(0.0, z_model_extended[0])]  # on axis -> flat start cap
-            # Tapered wall (measured + extrapolated transition), in axis order
-            profile_pts += [
-                (float(r), float(z))
-                for z, r in zip(z_model_extended, r_model_extended)
-            ]
-            profile_pts.append((radius_final, z_cyl_end))  # constant-radius cylinder wall
-            profile_pts.append((0.0, z_cyl_end))           # flat end cap back to axis
-
-            # polyline().close() returns to the first point along the axis (radius 0),
-            # closing the profile. Revolve about the Z axis (local Y of the XZ plane).
-            self.solid_combined = (
-                cq.Workplane("XZ")
-                .polyline(profile_pts)
-                .close()
-                .revolve(360, (0, 0, 0), (0, 1, 0))
-                .val()
+            # Optional reference planes from the two input fields
+            ref_diameters = parse_float_list(self.ref_diameters.text())
+            ref_positions = parse_float_list(self.ref_positions.text())
+            ref_bodies, ref_notes = build_reference_bodies(
+                model, ref_diameters, ref_positions
             )
 
-            # Step 6: Optional reference geometry (flat disks normal to the axis)
-            # Each disk is a separate surface body bundled with the solid; the
-            # solid itself is never modified.
-            z_full = np.concatenate([z_model_extended, [z_cyl_end]])
-            r_full = np.concatenate([r_model_extended, [radius_final]])
-
-            ref_bodies = []
-            ref_notes = []
-            # Stations specified by target diameter (searched on the taper only)
-            for d in parse_float_list(self.ref_diameters.text()):
-                crossings = solve_z_for_diameter(z_model_extended, r_model_extended, d)
-                if not crossings:
-                    ref_notes.append(f"Ø{d:.3f} mm: not reached on taper - skipped")
-                    continue
-                for zc in crossings:
-                    lr = float(np.interp(zc, z_full, r_full))
-                    ref_bodies.append(make_reference_disk(zc, lr))
-                    ref_notes.append(f"Ø{d:.3f} mm at z = {zc:.2f} mm")
-            # Stations specified by axial position
-            for zc in parse_float_list(self.ref_positions.text()):
-                if zc < z_full[0] or zc > z_full[-1]:
-                    ref_notes.append(f"z = {zc:.2f} mm: outside part - skipped")
-                    continue
-                lr = float(np.interp(zc, z_full, r_full))
-                ref_bodies.append(make_reference_disk(zc, lr))
-                ref_notes.append(f"z = {zc:.2f} mm (Ø{2 * lr:.3f} mm)")
-
-            # Bundle the reference disks with the solid (or export the solid alone)
-            if ref_bodies:
-                export_shape = cq.Compound.makeCompound(
-                    [self.solid_combined] + ref_bodies
-                )
-            else:
-                export_shape = self.solid_combined
-
-            # Step 7: Export the Final Solid as a STEP File
             output_path = self.output_path.text()
-            exporters.export(export_shape, output_path)
+            export_step(solid, ref_bodies, output_path)
 
-            # Update the summary
+            # Keep references for any later use / preview
+            self.solid_combined = solid
+
             ref_html = ""
             if ref_notes:
                 items = "".join(f"<li>{n}</li>" for n in ref_notes)
@@ -406,18 +238,20 @@ class LanternStepMaker(QMainWindow):
                 f"<h3>Model Created Successfully</h3>"
                 f"<p><b>Input File:</b> {os.path.basename(self.excel_file)}</p>"
                 f"<p><b>Output File:</b> {os.path.basename(output_path)}</p>"
-                f"<p><b>Model Length:</b> {z_extrapolated + extension_length:.2f} mm</p>"
-                f"<p><b>Initial Diameter:</b> {2 * r_model[0]:.2f} mm</p>"
+                f"<p><b>Model Length:</b> {model.z_cyl_end:.2f} mm</p>"
+                f"<p><b>Initial Diameter:</b> {2 * model.r_model[0]:.2f} mm</p>"
                 f"<p><b>Final Diameter:</b> {final_diameter:.2f} mm</p>"
                 f"{ref_html}"
             )
-            
-            # Update the plot
-            self.update_plot(z_model, r_model, z_extrap_points, r_extrap_points, 
-                             z_extrapolated, radius_final, extension_length)
-            
-            QMessageBox.information(self, "Success", f"STEP file saved as {output_path}")
-            
+
+            self.update_plot(model.z_model, model.r_model,
+                             model.z_extrap_points, model.r_extrap_points,
+                             model.z_extrapolated, model.radius_final,
+                             extension_length)
+
+            QMessageBox.information(self, "Success",
+                                    f"STEP file saved as {output_path}")
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
             raise e
