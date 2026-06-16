@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lantern-step"
+version = "0.4.0"
+description = "Generate lantern taper STEP files from fiber diameter profiles"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Chris Betters", email = "chris@chrisbetters.com"}]
+dependencies = [
+    "pandas>=1.3.0",
+    "numpy>=1.20.0",
+    "matplotlib>=3.4.0",
+    "scipy>=1.7.0",
+    "cadquery>=2.1.0",
+    "PyQt5>=5.15.0",
+    "openpyxl>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "flake8>=5.0", "mypy>=1.0"]
+build = ["pyinstaller>=6.0"]
+
+[project.gui-scripts]
+lantern-step = "lantern_step.gui:main"
+
+[project.scripts]
+lantern-step-cli = "lantern_step.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
