@@ -9,7 +9,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QFileDialog, QGroupBox, QFormLayout, QMessageBox,
                              QTabWidget)
-from PyQt5.QtCore import Qt
 
 from .core import (
     ModelParams,

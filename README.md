@@ -13,42 +13,34 @@ A GUI application for generating STEP files from fiber diameter measurements.
 - Generate and export STEP files for 3D printing or machining
 - Preview the model profile before generating
 
-## Installation
-
-### Using pip
+## Install
 
 ```bash
-pip install -r requirements.txt
+pip install -e .          # runtime + GUI + CLI
+pip install -e ".[dev]"   # + pytest/flake8/mypy
 ```
 
-### Required Dependencies
+## Use
 
-- pandas: Data handling
-- numpy: Numerical operations
-- scipy: Spline interpolation
-- matplotlib: Visualization
-- cadquery: 3D modeling
-- PyQt5: GUI framework
+- GUI: `lantern-step`  (or `python -m lantern_step`)
+- CLI: `lantern-step-cli INPUT.xlsx -o OUT.step --start 5 --end 65 --final-d 1.2 --ext 13 --ref-d 1.2 0.5 --ref-z 10 30`
+- Library:
 
-## Usage
+```python
+from lantern_step import load_profile, build_taper_model, make_solid, export_step, ModelParams
+from lantern_step import build_reference_bodies
 
-1. Run the application:
-   ```bash
-   python lantern_step_gui.py
-   ```
+profile = load_profile("PROFILE.xlsx")
+model = build_taper_model(profile, ModelParams(5, 65, 1.2, 13))
+solid = make_solid(model)
+bodies, notes = build_reference_bodies(model, diameters=[1.2], positions=[10, 30])
+export_step(solid, bodies, "OUT.step")
+```
 
-2. Click "Browse" to select an Excel file with fiber measurements
-   - The file should contain columns: 'Left Z Motor - Bottom Camera', 'Fiber Diameter - Bottom Camera', 'Fiber Diameter - Side Camera'
+## Build standalone apps
 
-3. The raw data will be automatically plotted and start/end distances set based on the data
-
-4. Adjust parameters as needed:
-   - Start Distance: Where to begin the model (mm)
-   - End Distance: Where to end the model (mm)
-   - Final Diameter: Diameter at the end of the taper (mm)
-   - Extension Length: Length of the cylindrical extension (mm)
-
-5. Click "Generate STEP File" to create and save the 3D model
+- macOS: `bash packaging/build_macos.sh`  -> `dist/LanternStep.app`
+- Windows: `packaging\build_windows.bat`  -> `dist\LanternStep\LanternStep.exe`
 
 ## File Format
 

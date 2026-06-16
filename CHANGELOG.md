@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.0 - 2026-06-16
+
+### Changed
+- Restructured into an installable `lantern_step` package (src layout) with a pure,
+  testable `core` (no Qt), a `references` module, a PyQt5 GUI, and a headless CLI.
+- GUI and notebook moved into the package / `examples/`; launch via `lantern-step`,
+  `lantern-step-cli`, or `python -m lantern_step`.
+
+### Added
+- Headless CLI (`lantern-step-cli`) for batch generation.
+- pytest suite covering the geometry pipeline and reference planes.
+- PyInstaller build scripts for standalone macOS (`.app`) and Windows (`.exe`) apps.
+
 ## v0.3.0 - 2026-06-16
 
 ### Added

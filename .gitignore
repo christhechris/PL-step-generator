@@ -33,3 +33,6 @@ docs/superpowers/
 # Generated STEP output (keep sample input under examples/)
 *.step
 !examples/**/*.step
+
+# Keep the PyInstaller spec tracked (global gitignore excludes *.spec)
+!packaging/lantern_step.spec
