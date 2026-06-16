@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.1 - 2026-06-17
+
+### Fixed
+- Frozen apps (PyInstaller) crashed on launch with `ImportError: attempted relative
+  import with no known parent package` before showing any UI. The entry module
+  `__main__.py` used a relative import (`from .gui import main`), which fails when
+  PyInstaller runs it as a top-level script. Switched to an absolute import
+  (`from lantern_step.gui import main`), which works both as the frozen entry point
+  and via `python -m lantern_step`.
+
 ## v0.4.0 - 2026-06-16
 
 ### Changed
