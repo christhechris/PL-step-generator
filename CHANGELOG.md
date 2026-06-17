@@ -2,6 +2,15 @@
 
 ## v0.4.1 - 2026-06-17
 
+### Added
+- GitHub Actions workflow (`.github/workflows/build-windows.yml`) that builds the
+  standalone Windows `.exe` on version tags (and manual dispatch), smoke-tests the
+  frozen app, uploads it as a workflow artifact, and attaches it to a GitHub Release
+  on tagged builds.
+- `LANTERN_STEP_SELFTEST` mode: running the app (or `python -m lantern_step`) with
+  this env var set exercises the import graph + OCCT kernel and exits without opening
+  a window - used by CI to catch frozen-app startup crashes deterministically.
+
 ### Fixed
 - Frozen apps (PyInstaller) crashed on launch with `ImportError: attempted relative
   import with no known parent package` before showing any UI. The entry module

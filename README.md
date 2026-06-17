@@ -42,6 +42,11 @@ export_step(solid, bodies, "OUT.step")
 - macOS: `bash packaging/build_macos.sh`  -> `dist/LanternStep.app`
 - Windows: `packaging\build_windows.bat`  -> `dist\LanternStep\LanternStep.exe`
 
+The Windows build also runs in CI: pushing a version tag (e.g. `git tag v0.4.1 &&
+git push origin v0.4.1`) builds the `.exe` on a Windows runner and attaches it to a
+GitHub Release. You can also trigger it manually from the Actions tab (uploads the
+build as a workflow artifact).
+
 ## File Format
 
 The input Excel file should contain fiber measurement data with the following columns:

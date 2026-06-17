@@ -359,11 +359,36 @@ class LanternStepMaker(QMainWindow):
                 self.centralWidget().findChild(QTabWidget).setCurrentIndex(i)
                 break
 
+def _run_selftest():
+    """Headless check for frozen-app CI smoke tests.
+
+    Reaching this function already proves the frozen entry point imported this
+    module (and therefore PyQt5) successfully - that import is exactly what broke
+    a frozen build before. We additionally exercise cadquery/OCCT so a broken
+    OCP bundle also fails. Exits 0 on success, non-zero on any failure, WITHOUT
+    opening a window (so it is reliable on a headless CI runner).
+    """
+    import cadquery as cq
+
+    from . import core, references  # noqa: F401  (import-graph check)
+
+    box = cq.Workplane("XY").box(1.0, 1.0, 1.0).val()
+    assert box.Volume() > 0, "OCCT kernel produced a degenerate solid"
+    print("LANTERN_STEP_SELFTEST OK: GUI + core + OCCT imports functional")
+    return 0
+
+
 def main():
+    # CI / smoke-test hook: run a headless self-check and exit instead of
+    # opening the GUI. Set LANTERN_STEP_SELFTEST=1 to enable.
+    if os.environ.get("LANTERN_STEP_SELFTEST"):
+        raise SystemExit(_run_selftest())
+
     app = QApplication(sys.argv)
     window = LanternStepMaker()
     window.show()
     sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()

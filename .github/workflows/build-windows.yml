@@ -1,0 +1,76 @@
+name: Build Windows App
+
+# Builds the standalone Windows .exe with PyInstaller. Runs on version tags
+# (e.g. v0.4.1) and on manual dispatch. On a tag it attaches the build to a
+# GitHub Release; every run also uploads it as a downloadable workflow artifact.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write  # required to create/upload GitHub Release assets
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller --noconfirm --clean packaging/lantern_step.spec
+
+      - name: Smoke-test the frozen app
+        run: |
+          $exe = "dist/LanternStep/LanternStep.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Built exe not found at $exe"; exit 1 }
+          # The self-test mode exercises the real frozen import graph (the class of
+          # bug that previously crashed the app on launch) plus the OCCT kernel,
+          # then exits 0 - without opening a window. We assert the exit code; a
+          # startup crash on a windowed app would instead hang on a dialog, which
+          # the timeout below catches.
+          $env:LANTERN_STEP_SELFTEST = "1"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          Write-Host "Running frozen-app self-test..."
+          $p = Start-Process -FilePath $exe -PassThru
+          if (-not $p.WaitForExit(120000)) {
+            Stop-Process -Id $p.Id -Force
+            Write-Error "Self-test did not exit within 120s (likely a startup crash)."
+            exit 1
+          }
+          if ($p.ExitCode -ne 0) {
+            Write-Error "Self-test exited with code $($p.ExitCode)."
+            exit 1
+          }
+          Write-Host "Self-test passed (frozen app imports + OCCT functional)."
+
+      - name: Package the app
+        run: Compress-Archive -Path dist/LanternStep -DestinationPath LanternStep-windows.zip -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanternStep-windows
+          path: LanternStep-windows.zip
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: LanternStep-windows.zip
