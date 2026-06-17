@@ -40,25 +40,36 @@ jobs:
         run: |
           $exe = "dist/LanternStep/LanternStep.exe"
           if (-not (Test-Path $exe)) { Write-Error "Built exe not found at $exe"; exit 1 }
-          # The self-test mode exercises the real frozen import graph (the class of
-          # bug that previously crashed the app on launch) plus the OCCT kernel,
-          # then exits 0 - without opening a window. We assert the exit code; a
-          # startup crash on a windowed app would instead hang on a dialog, which
-          # the timeout below catches.
+          # Run the frozen app in self-test mode: it exercises the real frozen
+          # import graph (the class of bug that previously crashed the app on
+          # launch) plus the OCCT kernel, writes a result file, and exits without
+          # opening a window. We poll for that file - a definitive pass signal
+          # that does not depend on capturing a windowed app's exit code. If the
+          # app crashed or hung on startup, no file appears and we fail.
+          $out = Join-Path $PWD "selftest_result.txt"
+          if (Test-Path $out) { Remove-Item $out }
           $env:LANTERN_STEP_SELFTEST = "1"
+          $env:LANTERN_STEP_SELFTEST_OUT = $out
           $env:QT_QPA_PLATFORM = "offscreen"
           Write-Host "Running frozen-app self-test..."
           $p = Start-Process -FilePath $exe -PassThru
-          if (-not $p.WaitForExit(120000)) {
-            Stop-Process -Id $p.Id -Force
-            Write-Error "Self-test did not exit within 120s (likely a startup crash)."
+          $ok = $false
+          for ($i = 0; $i -lt 120; $i++) {
+            if (Test-Path $out) { $ok = $true; break }
+            if ($p.HasExited) { break }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          if (-not $ok) {
+            Write-Error "Self-test produced no result file (frozen app crashed or hung on startup)."
             exit 1
           }
-          if ($p.ExitCode -ne 0) {
-            Write-Error "Self-test exited with code $($p.ExitCode)."
+          $content = (Get-Content $out -Raw).Trim()
+          if ($content -notmatch "LANTERN_STEP_SELFTEST OK") {
+            Write-Error "Unexpected self-test result: $content"
             exit 1
           }
-          Write-Host "Self-test passed (frozen app imports + OCCT functional)."
+          Write-Host "Self-test passed: $content"
 
       - name: Package the app
         run: Compress-Archive -Path dist/LanternStep -DestinationPath LanternStep-windows.zip -Force

@@ -374,7 +374,17 @@ def _run_selftest():
 
     box = cq.Workplane("XY").box(1.0, 1.0, 1.0).val()
     assert box.Volume() > 0, "OCCT kernel produced a degenerate solid"
-    print("LANTERN_STEP_SELFTEST OK: GUI + core + OCCT imports functional")
+
+    message = "LANTERN_STEP_SELFTEST OK: GUI + core + OCCT imports functional"
+    # A windowed (console=False) frozen app has no usable stdout and its exit
+    # code is awkward to capture on Windows, so also write the result to a file
+    # when LANTERN_STEP_SELFTEST_OUT is set. CI polls for this file as the
+    # definitive pass signal.
+    out_path = os.environ.get("LANTERN_STEP_SELFTEST_OUT")
+    if out_path:
+        with open(out_path, "w") as fh:
+            fh.write(message + "\n")
+    print(message)
     return 0
 
 
